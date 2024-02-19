@@ -15,7 +15,7 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self,validate_data):
         validate_data.pop('confirm_password',None)
 
-        return CustomUser.object.create_user(**validate_data)
+        return CustomUser.objects.create_user(**validate_data)
     
     
 class LoginSerializer(serializers.Serializer):
