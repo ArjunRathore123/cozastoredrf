@@ -32,6 +32,7 @@ class Product(models.Model):
     description=models.CharField(max_length=100)
     quantity=models.PositiveIntegerField(default=0)
     created_at=models.DateTimeField(default=timezone.now)
+    user=models.ForeignKey(CustomUser,on_delete=models.CASCADE)
     
     def __str__(self):
         return self.product_name
@@ -70,5 +71,28 @@ class Order(models.Model):
 
     def __str__(self):
         return f'{self.id} {self.user}'
+    
+class BuyerWallet(models.Model):
+    user=models.OneToOneField(CustomUser,on_delete=models.CASCADE)
+    balance=models.IntegerField(default=0)
+
+    def __str__(self):
+        return self.user.first_name
+class AdminWallet(models.Model):
+    user=models.OneToOneField(CustomUser,on_delete=models.CASCADE)
+    balance=models.IntegerField(default=0)
+
+    def __str__(self):
+        return self.user.first_name
+    
+class SellerWallet(models.Model):
+    user=models.OneToOneField(CustomUser,on_delete=models.CASCADE)
+    balance=models.IntegerField(default=0)
+
+    def __str__(self):
+        return self.user.first_name
+    
+
+
 
     

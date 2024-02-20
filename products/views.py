@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from .serializers import ProductSerializer,CartSerializer,OrderSerialzier
-from .models import Category,Product,Size,Cart,Order
+from .models import Category,Product,Size,Cart,Order,AdminWallet,BuyerWallet,SellerWallet
 from accounts.models import CustomUser
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
@@ -59,7 +59,7 @@ class ProductView(APIView):
                 sizes_list = [size.strip() for size in size.split(',')]
                 size = [Size.objects.get_or_create(size=size)[0] for size in sizes_list]
 
-                product=Product.objects.create(product_name=name,product_image=image,price=amt,quantity=qty,description=desc,category=category)
+                product=Product.objects.create(product_name=name,product_image=image,price=amt,quantity=qty,description=desc,category=category,user_id = request.user.id)
                 product.size.set(size)
 
                 return Response({
@@ -273,7 +273,7 @@ class QuantityView(APIView):
                 cart=Cart.objects.get(product=product,user=request.user)
                 if action=='increase':
                     if product.quantity > 0:
-                        cart.qunatity+=1
+                        cart.quantity+=1
                         product.quantity-=1
                         cart.save()
                         product.save()
@@ -381,7 +381,7 @@ class CreateOrderView(APIView):
                     {'success':True,
                     'status':status.HTTP_201_CREATED,
                     'msg':'Order Created',
-                    'data':serializer.data}
+                    'payment': payment, 'total_price': price}
                 )
             else:
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -391,20 +391,75 @@ class CreateOrderView(APIView):
                     'data':'Unauthorized User'
                 })
 
-# class PaymentSuccessView(APIView):
-#     permission_classes=[IsAuthenticated]
-#     authentication_classes=[JWTAuthentication]
-#     def put(self, request, *args, **kwargs):
-#         order_id=request.query_params.get('order_id')
-#         if request.user.user_type=='buyer':
-#             user=CustomUser.objects.get(id=request.user.id)
-#             order=
+class PaymentSuccessView(APIView):
+    permission_classes=[IsAuthenticated]
+    authentication_classes=[JWTAuthentication]
+    def put(self, request, *args, **kwargs):
+        order_id=request.query_params.get('order_id')
+        try:
+            user=CustomUser.objects.get(id=request.user.id)
+            admin=CustomUser.objects.get(user_type='admin')
+            seller=CustomUser.objects.get(user_type='seller')
+            order=Order.objects.get(razorpay_order_id=order_id)       
+            buyerwallet,created=BuyerWallet.objects.get_or_create(user=user)
+            adminwallet,created=AdminWallet.objects.get_or_create(user=admin)
+            sellerwallet,created=SellerWallet.objects.get_or_create(user=seller)
+        except Order.DoesNotExist:
+            return Response({'error': 'Order not found or does not belong to the user'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        data=request.data
+        ord_amt=int(data.get('order_amount'))
+        if order.is_paid:
+            return Response({'error': 'Order is already paid'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            if buyerwallet.balance >= ord_amt:
+                buyerwallet.balance-=ord_amt
+                buyerwallet.save()
+                commission=(ord_amt*5)/100
+                adminwallet.balance+=commission
+                adminwallet.save()
+                sellerwallet.balance+=ord_amt-commission
+                sellerwallet.save()
 
-#         return Response({
-#                     'success':False,
-#                     'status':status.HTTP_401_UNAUTHORIZED,
-#                     'data':'Unauthorized User'
-#                 })
-
-
+                order.is_paid=True
+                order.save()
+                serializer=OrderSerialzier(order)
+            
+            else:
+                order.is_paid=False
+                order.save()
+                return Response({
+                    'success':False,
+                    'status':status.HTTP_400_BAD_REQUEST,
+                    'data':'Insufficient Balance'
+                })
+            return Response(serializer.data,status.HTTP_200_OK)
+    
+class OrderCancelView(APIView):
+    permission_classes=[IsAuthenticated]
+    authentication_classes=[JWTAuthentication]
+    def delete(self,request, *args, **kwargs):
+        order_id=request.query_params.get('order_id')
+        try:
+            order=Order.objects.get(razorpay_order_id=order_id)
+            order.delete()
+            return Response(
+                        {'success':True,
+                        'status':status.HTTP_200_OK,
+                        'msg':f'Order {order_id} Cancelled',
+                        }
+                    )
+        except Order.DoesNotExist:
+             return Response(
+                    {'success':False,
+                    'status':status.HTTP_404_NOT_FOUND,
+                    'msg':f'Order {order_id} Not Found'}
+                )
         
+        except Exception as e:
+            return Response({
+                'success': False,
+                'status': status.HTTP_400_BAD_REQUEST,
+                'data': {'error': str(e)}
+            })
